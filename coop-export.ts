@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Coop transaction export
 // @namespace    http://bakemo.no/
-// @version      0.2
+// @version      0.3
 // @author       Peter Kristoffersen
 // @description  Press "-" to export the last month of transactions from currently open account
 // @match        https://nettbank.coop.no/no/coop/*
@@ -16,16 +16,16 @@ interface CoopTransaction {
     billingAmount: number;
     city: string;
     country: string;
-	transactionDate: string; //"2021-04-07T00:00:00.000+00:00",
+    transactionDate: string; //"2021-04-07T00:00:00.000+00:00",
     description: string;
     id: number;
 }
 
 
 
-class CoopUtilities{
+class CoopUtilities {
 
-    private static async getTransactions(account: string){
+    private static async getTransactions(account: string) {
         const response = await fetch(`https://nettbank.coop.no/darwin/api/card-account/${account}/transactions?page=1&perPage=50`, {
             "credentials": "include",
             "headers": {
@@ -35,51 +35,71 @@ class CoopUtilities{
             "method": "GET",
         });
 
-        const json: {transactions: CoopTransaction[]} = await response.json();
+        const json: { transactions: CoopTransaction[] } = await response.json();
         return json.transactions;
     }
 
-    private static getDescription(transaction: CoopTransaction){
-        return `${transaction.description} - ${transaction.city} ${transaction.country} - ${transaction.transactionAmount} ${transaction.transactionCurrency}`;
-    }
+    private static async downloadTransactions(account: string) {
+        if (account == null)
+            return;
 
-    private static async downloadTransactions(account: string)
-    {
-        if(account == null){
-            return;
-        }
         const transactions = await this.getTransactions(account);
-        const header = "date\tmemo\tamount\n";
-        const rows = transactions
-            .map(t => `${t.transactionDate.substring(0,10)}\t${this.getDescription(t)}\t${t.billingAmount}\n`);
-        if(rows.length === 0)
+        if (transactions.length == 0)
             return;
-        const blob = new Blob([header, ...rows], {type: "text/tsv"});
+
+        const { doc, transactionListElement } = this.createXmlDocument();
+
+        for (const transaction of transactions) {
+            const transactionElement = doc.createElement("STMTTRN");
+            const dateElem = transactionElement.appendChild(doc.createElement("DTPOSTED"));
+            const amountElem = transactionElement.appendChild(doc.createElement("TRNAMT"));
+            const nameElem = transactionElement.appendChild(doc.createElement("NAME"));
+            nameElem.append(transaction.description);
+            const date = new Date(transaction.transactionDate);
+            const dateString = date.getUTCFullYear().toString() + (date.getUTCMonth() + 1).toString().padStart(2, "0") + date.getUTCDate().toString().padStart(2, "0");
+            dateElem.append(dateString);
+            amountElem.append(transaction.billingAmount.toString());
+            transactionListElement.appendChild(transactionElement);
+        }
+
+        const xmlText = new XMLSerializer().serializeToString(doc);
+
+        const blob = new Blob([xmlText], { type: "application/x-ofx" });
 
         const link = document.createElement("a");
-        const dateString = new Date().toISOString().substring(0,10);
-        link.download = `${dateString} Coop Mastercard.tsv`;
+        const dateString = new Date().toISOString().substring(0, 10);
+        link.download = `${dateString} Coop Mastercard.ofx`;
         link.href = URL.createObjectURL(blob);
         link.click();
     }
 
-    private static getCurrentAccount(){
+    private static createXmlDocument() {
+        const doc = document.implementation.createDocument(null, "OFX", null);
+        const OFX = doc.documentElement;
+        const BANKMSGSRSV1 = OFX.appendChild(doc.createElement("BANKMSGSRSV1"));
+        const STMTTRNRS = BANKMSGSRSV1.appendChild(doc.createElement("STMTTRNRS"));
+        const STMTRS = STMTTRNRS.appendChild(doc.createElement("STMTRS"));
+        const transactionListElement = STMTRS.appendChild(doc.createElement("BANKTRANLIST"));
+        return { doc, transactionListElement }
+    }
+
+    private static getCurrentAccount() {
         const query = window.location.hash.split("?")[1];
-        if(query === undefined){
+        if (query === undefined) {
             throw "Can't get account id";
         }
         const usp = new URLSearchParams(query);
-        if(!usp.has("id")){
+        if (!usp.has("id")) {
             throw "Can't get account id";
         }
         return usp.get("id") as string;
     }
 
 
-    public static initialize(){
+    public static initialize() {
         console.log("Initializing Coop utitilies");
         document.addEventListener('keyup', (event) => {
-            switch(event.key){
+            switch (event.key) {
                 case "-": {
                     const currentAccount = CoopUtilities.getCurrentAccount();
                     CoopUtilities.downloadTransactions(currentAccount);
