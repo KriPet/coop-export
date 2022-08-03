@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         Coop transaction export
 // @namespace    http://bakemo.no/
-// @version      0.3
+// @version      0.4
 // @author       Peter Kristoffersen
 // @description  Press "-" to export the last month of transactions from currently open account
 // @match        https://nettbank.coop.no/no/coop/*
@@ -23,6 +23,17 @@ class CoopUtilities {
         const json = await response.json();
         return json.transactions;
     }
+    static createElementWithContent(doc, parent, elemName, elemContent) {
+        const newElem = doc.createElement(elemName);
+        newElem.append(elemContent);
+        parent.appendChild(newElem);
+    }
+    static dateToXmlDate(date) {
+        const year = date.getUTCFullYear().toString();
+        const month = (date.getUTCMonth() + 1).toString();
+        const day = date.getUTCDate().toString();
+        return year + month.padStart(2, "0") + day.padStart(2, "0");
+    }
     static async downloadTransactions(account) {
         if (account == null)
             return;
@@ -32,14 +43,11 @@ class CoopUtilities {
         const { doc, transactionListElement } = this.createXmlDocument();
         for (const transaction of transactions) {
             const transactionElement = doc.createElement("STMTTRN");
-            const dateElem = transactionElement.appendChild(doc.createElement("DTPOSTED"));
-            const amountElem = transactionElement.appendChild(doc.createElement("TRNAMT"));
-            const nameElem = transactionElement.appendChild(doc.createElement("NAME"));
-            nameElem.append(transaction.description);
             const date = new Date(transaction.transactionDate);
-            const dateString = date.getUTCFullYear().toString() + (date.getUTCMonth() + 1).toString().padStart(2, "0") + date.getUTCDate().toString().padStart(2, "0");
-            dateElem.append(dateString);
-            amountElem.append(transaction.billingAmount.toString());
+            this.createElementWithContent(doc, transactionElement, "DTPOSTED", this.dateToXmlDate(date));
+            this.createElementWithContent(doc, transactionElement, "TRNAMT", transaction.billingAmount.toString());
+            this.createElementWithContent(doc, transactionElement, "NAME", transaction.description);
+            this.createElementWithContent(doc, transactionElement, "MEMO", transaction.description);
             transactionListElement.appendChild(transactionElement);
         }
         const xmlText = new XMLSerializer().serializeToString(doc);
